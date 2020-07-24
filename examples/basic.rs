@@ -30,13 +30,14 @@ async fn init_tracing(stackdriver_creds: impl AsRef<Path>) {
     .map_err(|e| panic!("Error connecting to stackdriver: {:?}", e))
     .and_then(|exporter| {
       tracing::subscriber::set_global_default(
-        OpenTelemetryLayer::with_tracer(
-          sdk::Provider::builder()
-            .with_simple_exporter(exporter)
-            .build()
-            .get_tracer("example"),
-        )
-        .with_subscriber(Registry::default()),
+        OpenTelemetryLayer::default()
+          .with_tracer(
+            sdk::Provider::builder()
+              .with_simple_exporter(exporter)
+              .build()
+              .get_tracer("example"),
+          )
+          .with_subscriber(Registry::default()),
       )
       .map_err(|e| panic!("Error setting subscriber: {:?}", e))
     })

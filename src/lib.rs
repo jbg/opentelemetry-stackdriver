@@ -29,7 +29,6 @@ use opentelemetry::{
 };
 use proto::google::devtools::cloudtrace::v2::BatchWriteSpansRequest;
 use std::{
-  any::Any,
   sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -111,7 +110,7 @@ impl StackDriverExporter {
     rustls_config.set_protocols(&[Vec::from("h2".as_bytes())]);
     let tls_config = ClientTlsConfig::new().rustls_client_config(rustls_config);
 
-    let channel = Channel::builder(uri).tls_config(tls_config).connect().await?;
+    let channel = Channel::builder(uri).tls_config(tls_config)?.connect().await?;
     let (tx, rx) = futures::channel::mpsc::channel(64);
     let pending_count = Arc::new(AtomicUsize::new(0));
     spawn.spawn_obj(
@@ -175,7 +174,7 @@ impl StackDriverExporter {
               attribute_map: span
                 .attributes
                 .iter()
-                .map(|(key, value)| (key.inner().clone().into_owned(), attribute_value_conversion(value.clone())))
+                .map(|(key, value)| (key.as_str().to_string(), attribute_value_conversion(value.clone())))
                 .collect(),
               ..Default::default()
             };
@@ -198,11 +197,11 @@ impl StackDriverExporter {
               name: format!(
                 "projects/{}/traces/{}/spans/{}",
                 project_name,
-                hex::encode(span.context.trace_id().to_u128().to_be_bytes()),
-                hex::encode(span.context.span_id().to_u64().to_be_bytes())
+                hex::encode(span.span_context.trace_id().to_u128().to_be_bytes()),
+                hex::encode(span.span_context.span_id().to_u64().to_be_bytes())
               ),
               display_name: Some(to_truncate(span.name.clone())),
-              span_id: hex::encode(span.context.span_id().to_u64().to_be_bytes()),
+              span_id: hex::encode(span.span_context.span_id().to_u64().to_be_bytes()),
               parent_span_id: hex::encode(span.parent_span_id.to_u64().to_be_bytes()),
               start_time: Some(span.start_time.into()),
               end_time: Some(span.end_time.into()),
@@ -276,10 +275,6 @@ impl SpanExporter for StackDriverExporter {
       std::thread::yield_now();
       // Spin for a bit and give the inner export some time to upload, with a timeout.
     }
-  }
-
-  fn as_any(&self) -> &dyn Any {
-    self
   }
 }
 
