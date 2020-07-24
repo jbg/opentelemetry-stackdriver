@@ -88,7 +88,7 @@ pub struct StackDriverExporter {
 impl StackDriverExporter {
   /// If `num_concurrent_requests` is set to `0` or `None` then no limit is enforced.
   pub async fn connect<S: futures::task::Spawn>(
-    authenticate: impl Fn(&[&'static str]) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error + Send>>> + Send>> + Send + Sync + 'static,
+    authenticate: impl Fn(&[&'static str]) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync + 'static>>> + Send>> + Send + Sync + 'static,
     project_name: &str,
     spawn: &S,
     maximum_shutdown_duration: Option<Duration>,
@@ -129,7 +129,7 @@ impl StackDriverExporter {
 
   async fn export_inner(
     client: TraceServiceClient<Channel>,
-    authenticate: impl Fn(&[&'static str]) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error + Send>>> + Send>> + Send + Sync + 'static,
+    authenticate: impl Fn(&[&'static str]) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync + 'static>>> + Send>> + Send + Sync + 'static,
     project_name: String,
     rx: futures::channel::mpsc::Receiver<Vec<Arc<SpanData>>>,
     pending_count: Arc<AtomicUsize>,
