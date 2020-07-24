@@ -22,13 +22,14 @@
 
 use derivative::Derivative;
 use futures::stream::StreamExt;
-use hyper::client::connect::Connect;
 use opentelemetry::{
   api::core::Value,
   exporter::trace::{ExportResult, SpanData, SpanExporter},
 };
 use proto::google::devtools::cloudtrace::v2::BatchWriteSpansRequest;
 use std::{
+  future::Future,
+  pin::Pin,
   sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -40,7 +41,6 @@ use tonic::{
   transport::{Channel, ClientTlsConfig},
   IntoRequest, Request,
 };
-use yup_oauth2::authenticator::Authenticator;
 
 pub mod proto {
   pub mod google {
@@ -88,23 +88,14 @@ pub struct StackDriverExporter {
 impl StackDriverExporter {
   /// If `num_concurrent_requests` is set to `0` or `None` then no limit is enforced.
   pub async fn connect<S: futures::task::Spawn>(
-    credentials_path: impl AsRef<std::path::Path>,
-    persistent_token_file: impl Into<Option<std::path::PathBuf>>,
+    authenticate: impl Fn(&[&'static str]) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error + Send>>> + Send>> + Send + Sync + 'static,
+    project_name: &str,
     spawn: &S,
     maximum_shutdown_duration: Option<Duration>,
     num_concurrent_requests: impl Into<Option<usize>>,
   ) -> Result<Self, Box<dyn std::error::Error>> {
     let num_concurrent_requests = num_concurrent_requests.into();
     let uri = http::uri::Uri::from_static("https://cloudtrace.googleapis.com:443");
-
-    let service_account_key = yup_oauth2::read_service_account_key(&credentials_path).await?;
-    let project_name = service_account_key.project_id.as_ref().ok_or("project_id is missing")?.clone();
-    let mut authenticator = yup_oauth2::ServiceAccountAuthenticator::builder(service_account_key);
-    if let Some(persistent_token_file) = persistent_token_file.into() {
-      authenticator = authenticator.persist_tokens_to_disk(persistent_token_file);
-    }
-    let authenticator = authenticator.build().await?;
-
     let mut rustls_config = rustls::ClientConfig::new();
     rustls_config.root_store.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     rustls_config.set_protocols(&[Vec::from("h2".as_bytes())]);
@@ -116,8 +107,8 @@ impl StackDriverExporter {
     spawn.spawn_obj(
       Box::new(Self::export_inner(
         TraceServiceClient::new(channel),
-        authenticator,
-        project_name,
+        authenticate,
+        project_name.to_string(),
         rx,
         pending_count.clone(),
         num_concurrent_requests,
@@ -136,17 +127,15 @@ impl StackDriverExporter {
     self.pending_count.load(Ordering::Relaxed)
   }
 
-  async fn export_inner<C>(
+  async fn export_inner(
     client: TraceServiceClient<Channel>,
-    authenticator: Authenticator<C>,
+    authenticate: impl Fn(&[&'static str]) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error + Send>>> + Send>> + Send + Sync + 'static,
     project_name: String,
     rx: futures::channel::mpsc::Receiver<Vec<Arc<SpanData>>>,
     pending_count: Arc<AtomicUsize>,
     num_concurrent: impl Into<Option<usize>>,
-  ) where
-    C: Connect + Clone + Send + Sync + 'static,
-  {
-    let authenticator = &authenticator;
+  ) {
+    let authenticate = &authenticate;
     rx.for_each_concurrent(num_concurrent, move |batch| {
       let mut client = client.clone(); // This clone is cheap and allows for concurrent requests (see https://github.com/hyperium/tonic/issues/285#issuecomment-595880400)
       let project_name = project_name.clone();
@@ -157,7 +146,7 @@ impl StackDriverExporter {
           Span,
         };
         let scopes = &["https://www.googleapis.com/auth/trace.append"];
-        let token = authenticator.token(scopes).await;
+        let token = authenticate(scopes).await;
         log::trace!("Got StackDriver auth token: {:?}", token);
         let bearer_token = match token {
           Ok(token) => format!("Bearer {}", token.as_str()),
