@@ -276,6 +276,7 @@ fn attribute_value_conversion(v: Value) -> AttributeValue {
     Value::I64(v) => attribute_value::Value::IntValue(v),
     Value::String(v) => attribute_value::Value::StringValue(to_truncate(v)),
     Value::U64(v) => attribute_value::Value::IntValue(v as i64),
+    Value::Array(_) => attribute_value::Value::StringValue(to_truncate("[]".to_string())), // TODO
   };
   AttributeValue { value: Some(new_value) }
 }
